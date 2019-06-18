@@ -1048,6 +1048,98 @@ class LrNatListCommand(cmd.ReadOnlyCommand):
         self.result = [rowview.RowView(r) for r in lr.nat]
 
 
+class LrPolicyAddCommand(cmd.BaseCommand):
+    def __init__(self, api, router, priority, match, action, nexthop=None,
+                 may_exist=False):
+        if not 0 <= priority <= const.LR_POLICY_PRIORITY_MAX:
+            raise ValueError("priority must be between 0 and %s, inclusive" % (
+                             const.LR_POLICY_PRIORITY_MAX))
+        if action not in const.POLICY_ACTION_TYPES:
+            raise TypeError(
+                "action not in %s" % str(const.POLICY_ACTION_TYPES))
+        if action == const.POLICY_ACTION_REROUTE:
+            if not nexthop:
+                raise ValueError(
+                    "must specify nexthop for action %s"
+                    % const.POLICY_ACTION_REROUTE)
+            nexthop = str(netaddr.IPAddress(nexthop))
+        if nexthop and action != const.POLICY_ACTION_REROUTE:
+            raise ValueError(
+                "nexthop only valid for action %s"
+                % const.POLICY_ACTION_REROUTE)
+        super(LrPolicyAddCommand, self).__init__(api)
+        self.router = router
+        self.priority = priority
+        self.match = match
+        self.action = action
+        self.nexthop = nexthop or []
+        self.may_exist = may_exist
+
+    def run_idl(self, txn):
+        lr = self.api.lookup('Logical_Router', self.router)
+        for policy in lr.policies:
+            if (self.priority, self.match) == (policy.priority, policy.match):
+                if self.may_exist:
+                    policy.action = self.action
+                    policy.nexthop = self.nexthop
+                    self.result = rowview.RowView(policy)
+                    return
+                raise RuntimeError("Logical_Router Policy already exists")
+        policy = txn.insert(self.api.tables['Logical_Router_Policy'])
+        policy.priority = self.priority
+        policy.match = self.match
+        policy.action = self.action
+        policy.nexthop = self.nexthop
+        lr.addvalue('policies', policy)
+        self.result = policy.uuid
+
+    def post_commit(self, txn):
+        real_uuid = txn.get_insert_uuid(self.result)
+        if real_uuid:
+            row = self.api.tables['Logical_Router_Policy'].rows[real_uuid]
+            self.result = rowview.RowView(row)
+
+
+class LrPolicyDelCommand(cmd.BaseCommand):
+    def __init__(self, api, router, priority=None, match=None,
+                 if_exists=False):
+        self.conditions = []
+        if match is not None:
+            self.conditions += [('match', '=', match)]
+        if priority is not None:
+            self.conditions += [('priority', '=', priority)]
+        super(LrPolicyDelCommand, self).__init__(api)
+        self.router = router
+        self.priority = priority
+        self.match = match
+        self.if_exists = if_exists
+
+    def run_idl(self, txn):
+        lr = self.api.lookup('Logical_Router', self.router)
+        found = False
+        for policy in lr.policies:
+            if idlutils.row_match(policy, self.conditions):
+                found = True
+                lr.delvalue('policies', policy)
+                policy.delete()
+                if self.match and self.priority:
+                    return
+        if self.match and self.priority and not (found or self.if_exists):
+            raise RuntimeError(
+                "Policy with match %s and priority %s does not exist in "
+                "router %s" % (self.match, self.priority, self.router))
+
+
+class LrPolicyListCommand(cmd.ReadOnlyCommand):
+    def __init__(self, api, router):
+        super(LrPolicyListCommand, self).__init__(api)
+        self.router = router
+
+    def run_idl(self, txn):
+        lr = self.api.lookup('Logical_Router', self.router)
+        self.result = [rowview.RowView(r) for r in lr.policies]
+
+
 class LbAddCommand(cmd.BaseCommand):
     def __init__(self, api, lb, vip, ips, protocol=const.PROTO_TCP,
                  may_exist=False, **columns):
