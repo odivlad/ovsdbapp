@@ -847,7 +847,7 @@ class LrpGetOptionsCommand(LspGetOptionsCommand):
 
 class LrRouteAddCommand(cmd.BaseCommand):
     def __init__(self, api, router, prefix, nexthop, port=None,
-                 policy='dst-ip', may_exist=False):
+                 policy='dst-ip', route_table=None, may_exist=False):
         prefix = str(netaddr.IPNetwork(prefix))
         nexthop = str(netaddr.IPAddress(nexthop))
         super().__init__(api)
@@ -856,12 +856,15 @@ class LrRouteAddCommand(cmd.BaseCommand):
         self.nexthop = nexthop
         self.port = port
         self.policy = policy
+        self.route_table = route_table
         self.may_exist = may_exist
 
     def run_idl(self, txn):
         lr = self.api.lookup('Logical_Router', self.router)
         for route in lr.static_routes:
-            if self.prefix == route.ip_prefix:
+            if not self.route_table:
+                self.route_table = ""
+            if self.prefix == route.ip_prefix and self.route_table == route.route_table:
                 if not self.may_exist:
                     msg = "Route %s already exists on router %s" % (
                         self.prefix, self.router)
@@ -876,6 +879,7 @@ class LrRouteAddCommand(cmd.BaseCommand):
         route.ip_prefix = self.prefix
         route.nexthop = self.nexthop
         route.policy = self.policy
+        route.route_table = self.route_table
         if self.port:
             route.port = self.port
         lr.addvalue('static_routes', route)
@@ -890,12 +894,13 @@ class LrRouteAddCommand(cmd.BaseCommand):
 
 
 class LrRouteDelCommand(cmd.BaseCommand):
-    def __init__(self, api, router, prefix=None, if_exists=False):
+    def __init__(self, api, router, prefix=None, route_table=None, if_exists=False):
         if prefix is not None:
             prefix = str(netaddr.IPNetwork(prefix))
         super().__init__(api)
         self.router = router
         self.prefix = prefix
+        self.route_table = route_table
         self.if_exists = if_exists
 
     def run_idl(self, txn):
@@ -903,8 +908,10 @@ class LrRouteDelCommand(cmd.BaseCommand):
         if not self.prefix:
             lr.static_routes = []
             return
+        if not self.route_table:
+            self.route_table = ""
         for route in lr.static_routes:
-            if self.prefix == route.ip_prefix:
+            if self.prefix == route.ip_prefix and self.route_table == route.route_table:
                 lr.delvalue('static_routes', route)
                 # There should only be one possible match
                 return
