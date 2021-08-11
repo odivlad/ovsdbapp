@@ -881,7 +881,7 @@ class LrRouteAddCommand(cmd.BaseCommand):
         route.policy = self.policy
         route.route_table = self.route_table
         if self.port:
-            route.port = self.port
+            route.output_port = self.port
         lr.addvalue('static_routes', route)
         self.result = route.uuid
 
