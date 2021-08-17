@@ -30,7 +30,8 @@ Summary:    Python OVSDB Application Library
 Requires:   python3-openvswitch
 Requires:   python36-pbr
 Requires:   python36-netaddr >= 0.7.18
-Provides:   python36-%{library}}
+Provides:   python36-%{library}
+Obsoletes:  python36-ovsdbapp < %{version}
 
 BuildRequires:  python%{python3_pkgversion}-devel
 BuildRequires:  python36-pbr
