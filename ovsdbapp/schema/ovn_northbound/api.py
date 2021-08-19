@@ -690,6 +690,51 @@ class API(api.API, metaclass=abc.ABCMeta):
         """
 
     @abc.abstractmethod
+    def lr_policy_add(self, router, priority, match, action,
+                      nexthop=None, may_exist=False):
+        """Add a routing policy (PBR) to 'router'
+
+        :param router:    The name or uuid of the router
+        :type router:     string or uuid.UUID
+        :param priority:  The priority of the policy
+        :type priority:   int
+        :param match:     The match rule
+        :type match:      string
+        :param action:    The action to take upon match
+        :type action:     POLICY_ACTION_ALLOW, POLICY_ACTION_DROP,
+                          POLICY_ACTION_REROUTE
+        :param nexthop:   The nexthop IP address which needs to be passed
+                          only if action is POLICY_ACTION_REROUTE
+        :type nexthop:    string
+        :returns:         :class:`Command` with RowView result
+        """
+
+    @abc.abstractmethod
+    def lr_policy_del(self, router, priority=None, match=None,
+                      if_exists=False):
+        """Remove routing policies (PBR) from router
+
+        :param router:     The name or uuid of the router
+        :type router:      string or uuid.UUID
+        :param priority:   The priority of the rule
+        :type priority:    int
+        :param match:      The match rule
+        :type match:       string
+        :param if_exists:  If True, don't fail if the port doesn't exist
+        :type if_exists:   boolean
+        :returns:          :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
+    def lr_policy_list(self, router):
+        """Get the list of routing policies on 'router'
+
+        :param router: The name or uuid of the router
+        :type router:  string or uuid.UUID
+        :returns:      :class:`Command` with RowView list result
+        """
+
+    @abc.abstractmethod
     def lb_add(self, lb, vip, ips, protocol=const.PROTO_TCP, may_exist=False,
                **columns):
         """Create a load-balancer or add a VIP to an existing load balancer
