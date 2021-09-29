@@ -864,7 +864,8 @@ class LrRouteAddCommand(cmd.BaseCommand):
         for route in lr.static_routes:
             if (
                 self.prefix == route.ip_prefix and
-                self.route_table == route.route_table
+                self.route_table == route.route_table and
+                "ic-learned-route" not in route.external_ids
             ):
                 if not self.may_exist:
                     msg = "Route %s already exists on router %s" % (
