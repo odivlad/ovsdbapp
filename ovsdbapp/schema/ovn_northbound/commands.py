@@ -815,6 +815,10 @@ class LrpListCommand(cmd.ReadOnlyCommand):
         self.result = [rowview.RowView(r) for r in router.ports]
 
 
+class LrpGetCommand(cmd.BaseGetRowCommand):
+    table = 'Logical_Router_Port'
+
+
 class LrpSetEnabledCommand(cmd.BaseCommand):
     def __init__(self, api, port, is_enabled):
         super().__init__(api)
@@ -845,23 +849,76 @@ class LrpGetOptionsCommand(LspGetOptionsCommand):
     table = 'Logical_Router_Port'
 
 
+class LrpSetGatewayChassisCommand(cmd.BaseCommand):
+    table = 'Logical_Router_Port'
+
+    def __init__(self, api, port, gateway_chassis, priority):
+        super().__init__(api)
+        self.port = port
+        self.gateway_chassis = gateway_chassis
+        self.priority = priority
+
+    def run_idl(self, txn):
+        lrp = self.api.lookup(self.table, self.port)
+        gwc_name = '%s_%s' % (lrp.name, self.gateway_chassis)
+        cmd = GatewayChassisAddCommand(self.api, gwc_name,
+                                       self.gateway_chassis,
+                                       self.priority, may_exist=True)
+        cmd.run_idl(txn)
+        lrp.addvalue('gateway_chassis', cmd.result)
+
+
+class LrpGetGatewayChassisCommand(LrpGetOptionsCommand):
+    def run_idl(self, txn):
+        lrp = self.api.lookup(self.table, self.port)
+        self.result = [rowview.RowView(d) for d in lrp.gateway_chassis]
+
+
+class LrpDelGatewayChassisCommand(cmd.BaseCommand):
+    table = 'Logical_Router_Port'
+
+    def __init__(self, api, port, gateway_chassis, if_exists=False):
+        super().__init__(api)
+        self.port = port
+        self.gateway_chassis = gateway_chassis
+        self.if_exists = if_exists
+
+    def run_idl(self, txn):
+        lrp = self.api.lookup(self.table, self.port)
+        for gwc in lrp.gateway_chassis:
+            if gwc.chassis_name == self.gateway_chassis:
+                lrp.delvalue('gateway_chassis', gwc)
+                return
+
+        if not self.if_exists:
+            msg = "Gateway chassis '%s' on port %s does not exist" % (
+                self.gateway_chassis, self.port)
+            raise RuntimeError(msg)
+
+
 class LrRouteAddCommand(cmd.BaseCommand):
     def __init__(self, api, router, prefix, nexthop, port=None,
-                 policy='dst-ip', may_exist=False):
+                 policy='dst-ip', route_table=None, may_exist=False):
         prefix = str(netaddr.IPNetwork(prefix))
-        nexthop = str(netaddr.IPAddress(nexthop))
+        if nexthop != const.ROUTE_DISCARD:
+            nexthop = str(netaddr.IPAddress(nexthop))
         super().__init__(api)
         self.router = router
         self.prefix = prefix
         self.nexthop = nexthop
         self.port = port
         self.policy = policy
+        self.route_table = route_table or ""
         self.may_exist = may_exist
 
     def run_idl(self, txn):
         lr = self.api.lookup('Logical_Router', self.router)
         for route in lr.static_routes:
-            if self.prefix == route.ip_prefix:
+            if (
+                self.prefix == route.ip_prefix and
+                self.route_table == route.route_table and
+                "ic-learned-route" not in route.external_ids
+            ):
                 if not self.may_exist:
                     msg = "Route %s already exists on router %s" % (
                         self.prefix, self.router)
@@ -876,6 +933,7 @@ class LrRouteAddCommand(cmd.BaseCommand):
         route.ip_prefix = self.prefix
         route.nexthop = self.nexthop
         route.policy = self.policy
+        route.route_table = self.route_table
         if self.port:
             route.output_port = self.port
         lr.addvalue('static_routes', route)
@@ -890,12 +948,14 @@ class LrRouteAddCommand(cmd.BaseCommand):
 
 
 class LrRouteDelCommand(cmd.BaseCommand):
-    def __init__(self, api, router, prefix=None, if_exists=False):
+    def __init__(self, api, router,
+                 prefix=None, route_table=None, if_exists=False):
         if prefix is not None:
             prefix = str(netaddr.IPNetwork(prefix))
         super().__init__(api)
         self.router = router
         self.prefix = prefix
+        self.route_table = route_table
         self.if_exists = if_exists
 
     def run_idl(self, txn):
@@ -903,8 +963,13 @@ class LrRouteDelCommand(cmd.BaseCommand):
         if not self.prefix:
             lr.static_routes = []
             return
+        if not self.route_table:
+            self.route_table = ""
         for route in lr.static_routes:
-            if self.prefix == route.ip_prefix:
+            if (
+                self.prefix == route.ip_prefix and
+                self.route_table == route.route_table
+            ):
                 lr.delvalue('static_routes', route)
                 # There should only be one possible match
                 return
@@ -916,13 +981,20 @@ class LrRouteDelCommand(cmd.BaseCommand):
 
 
 class LrRouteListCommand(cmd.ReadOnlyCommand):
-    def __init__(self, api, router):
+    def __init__(self, api, router, route_table):
         super().__init__(api)
         self.router = router
+        # NOTE: pass "" to get routes of global route table
+        self.route_table = route_table
 
     def run_idl(self, txn):
         lr = self.api.lookup('Logical_Router', self.router)
-        self.result = [rowview.RowView(r) for r in lr.static_routes]
+        if self.route_table is not None:
+            self.result = [rowview.RowView(r)
+                           for r in lr.static_routes
+                           if r.route_table == self.route_table]
+        else:
+            self.result = [rowview.RowView(r) for r in lr.static_routes]
 
 
 class LrNatAddCommand(cmd.BaseCommand):

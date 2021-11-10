@@ -180,6 +180,9 @@ class OvnNbApiIdlImpl(ovs_idl.Backend, api.API):
     def lrp_list(self, router):
         return cmd.LrpListCommand(self, router)
 
+    def lrp_get(self, port):
+        return cmd.LrpGetCommand(self, port)
+
     def lrp_set_enabled(self, port, is_enabled):
         return cmd.LrpSetEnabledCommand(self, port, is_enabled)
 
@@ -192,16 +195,27 @@ class OvnNbApiIdlImpl(ovs_idl.Backend, api.API):
     def lrp_get_options(self, port):
         return cmd.LrpGetOptionsCommand(self, port)
 
+    def lrp_set_gateway_chassis(self, port, gateway_chassis, priority=0):
+        return cmd.LrpSetGatewayChassisCommand(self,
+                                               port, gateway_chassis, priority)
+
+    def lrp_get_gateway_chassis(self, port):
+        return cmd.LrpGetGatewayChassisCommand(self, port)
+
+    def lrp_del_gateway_chassis(self, port, gateway_chassis, if_exists=False):
+        return cmd.LrpDelGatewayChassisCommand(self, port,
+                                               gateway_chassis, if_exists)
+
     def lr_route_add(self, router, prefix, nexthop, port=None,
-                     policy='dst-ip', may_exist=False):
+                     policy='dst-ip', route_table=None, may_exist=False):
         return cmd.LrRouteAddCommand(self, router, prefix, nexthop, port,
-                                     policy, may_exist)
+                                     policy, route_table, may_exist)
 
-    def lr_route_del(self, router, prefix=None, if_exists=False):
-        return cmd.LrRouteDelCommand(self, router, prefix, if_exists)
+    def lr_route_del(self, router, prefix=None, route_table=None, if_exists=False):
+        return cmd.LrRouteDelCommand(self, router, prefix, route_table, if_exists)
 
-    def lr_route_list(self, router):
-        return cmd.LrRouteListCommand(self, router)
+    def lr_route_list(self, router, route_table=None):
+        return cmd.LrRouteListCommand(self, router, route_table)
 
     def lr_nat_add(self, router, nat_type, external_ip, logical_ip,
                    logical_port=None, external_mac=None, may_exist=False):
