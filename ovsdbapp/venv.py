@@ -32,12 +32,16 @@ class OvsVenvFixture(fixtures.Fixture):
         os.path.join(os.path.sep, 'usr', 'local', 'share', 'openvswitch'),
         os.path.join(os.path.sep, 'usr', 'share', 'openvswitch'))
 
-    def __init__(self, venv, ovsdir=None, dummy=DUMMY_OVERRIDE_ALL,
-                 remove=False):
+    OVS_SCHEMA = 'vswitch.ovsschema'
+    VTEP_SCHEMA = 'vtep.ovsschema'
+
+    def __init__(self, venv, ovsdir=None, vtepdir=None,
+                 dummy=DUMMY_OVERRIDE_ALL, remove=False):
         """Initialize fixture
 
         :param venv: Path to venv directory.
         :param ovsdir: Path to directory containing ovs source codes.
+        :param vtepdir: Path to directory containing vtep source codes.
         :param dummy: One of following: an empty string, 'override' or
                       'system'.
         :param remove: Boolean value whether venv directory should be removed
@@ -46,6 +50,9 @@ class OvsVenvFixture(fixtures.Fixture):
         self.venv = venv
         self.env = {'OVS_RUNDIR': self.venv, 'OVS_LOGDIR': self.venv,
                     'OVS_DBDIR': self.venv, 'OVS_SYSCONFDIR': self.venv}
+
+        if vtepdir and os.path.isdir(vtepdir):
+            self.PATH_VAR_TEMPLATE += ":{0}".format(vtepdir)
         if ovsdir and os.path.isdir(ovsdir):
             # From source directory
             self.env['PATH'] = (self.PATH_VAR_TEMPLATE.format(ovsdir) +
@@ -55,6 +62,8 @@ class OvsVenvFixture(fixtures.Fixture):
             self.env['PATH'] = os.getenv('PATH')
 
         self.ovsdir = self._share_path(self.OVS_PATHS, ovsdir)
+        self.vtepdir = self._share_path(self.OVS_PATHS, vtepdir)
+
         self._dummy = dummy
         self.remove = remove
         self.ovsdb_server_dbs = []
@@ -76,10 +85,14 @@ class OvsVenvFixture(fixtures.Fixture):
 
     @property
     def ovs_schema(self):
-        path = os.path.join(self.ovsdir, 'vswitchd', 'vswitch.ovsschema')
+        path = os.path.join(self.ovsdir, 'vswitchd', self.OVS_SCHEMA)
         if os.path.isfile(path):
             return path
-        return os.path.join(self.ovsdir, 'vswitch.ovsschema')
+        return os.path.join(self.ovsdir, self.OVS_SCHEMA)
+
+    @property
+    def vtep_schema(self):
+        return os.path.join(self.vtepdir, self.VTEP_SCHEMA)
 
     @property
     def dummy_arg(self):
@@ -100,9 +113,10 @@ class OvsVenvFixture(fixtures.Fixture):
         self.init_processes()
 
     def setup_dbs(self):
-        db_filename = 'conf.db'
-        self.create_db(db_filename, self.ovs_schema)
-        self.ovsdb_server_dbs.append(db_filename)
+        for db_filename, schema in zip(['conf.db', 'vtep.db'],
+                                       [self.ovs_schema, self.vtep_schema]):
+            self.create_db(db_filename, schema)
+            self.ovsdb_server_dbs.append(db_filename)
 
     def start_ovsdb_processes(self):
         self.call([
@@ -116,6 +130,9 @@ class OvsVenvFixture(fixtures.Fixture):
         self.call(['ovs-vswitchd', '--detach', '--no-chdir', '--pidfile',
                    '-vconsole:off', '-vvconn', '-vnetdev_dummy', '--log-file',
                    self.dummy_arg, self.ovs_connection])
+        # there are no 'init' method in vtep-ctl,
+        # but record in 'Global' table is needed
+        self.call(['vtep-ctl', 'show'])
 
     def deactivate(self):
         self.kill_processes()
