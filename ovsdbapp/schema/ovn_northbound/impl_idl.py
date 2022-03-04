@@ -80,10 +80,30 @@ class OvnNbApiIdlImpl(ovs_idl.Backend, api.API):
     def pg_acl_list(self, port_group):
         return cmd.PgAclListCommand(self, port_group)
 
+    def address_set_add(self, name, addresses=None, may_exist=False):
+        return cmd.AddressSetAddCommand(self, name, addresses, may_exist)
+
+    def address_set_del(self, address_set, if_exists=False):
+        return cmd.AddressSetDelCommand(self, address_set, if_exists)
+
+    def address_set_get(self, address_set):
+        return cmd.AddressSetGetCommand(self, address_set)
+
+    def address_set_list(self):
+        return cmd.AddressSetListCommand(self)
+
+    def address_set_add_addresses(self, address_set, addresses):
+        return cmd.AddressSetAddAddressesCommand(self, address_set, addresses)
+
+    def address_set_remove_addresses(self, address_set, addresses):
+        return cmd.AddressSetRemoveAddressCommand(self, address_set, addresses)
+
     def qos_add(self, switch, direction, priority, match, rate=None,
-                burst=None, dscp=None, may_exist=False, **columns):
+                burst=None, dscp=None, external_ids_match=None,
+                may_exist=False, **columns):
         return cmd.QoSAddCommand(self, switch, direction, priority, match,
-                                 rate, burst, dscp, may_exist, **columns)
+                                 rate, burst, dscp, external_ids_match,
+                                 may_exist, **columns)
 
     def qos_del(self, switch, direction=None, priority=None, match=None,
                 if_exists=True):
