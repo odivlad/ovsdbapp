@@ -10,14 +10,19 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from ovsdbapp.schema.ovn_southbound import impl_idl
+from ovsdbapp.schema.hardware_vtep import impl_idl
 from ovsdbapp.tests.functional.schema import fixtures
 
 
-class SbApiFixture(fixtures.ApiImplFixture):
-    api_cls = impl_idl.OvnSbApiIdlImpl
+class HwVtepApiFixture(fixtures.ApiImplFixture):
+    api_cls = impl_idl.HwVtepApiIdlImpl
 
 
-class ChassisFixture(fixtures.ImplIdlFixture):
-    create = 'chassis_add'
-    delete = 'chassis_del'
+class PhysicalSwitchFixture(fixtures.ImplIdlFixture):
+    create = 'add_ps'
+    delete = 'del_ps'
+
+
+class LogicalSwitchFixture(fixtures.ImplIdlFixture):
+    create = 'add_ls'
+    delete = 'del_ls'
