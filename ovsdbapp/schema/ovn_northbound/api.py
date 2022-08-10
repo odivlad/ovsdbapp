@@ -696,6 +696,33 @@ class API(api.API, metaclass=abc.ABCMeta):
         """
 
     @abc.abstractmethod
+    def lrp_add_networks(self, port, networks, may_exist=False):
+        """Add a network to 'port'
+
+        :param port:      The name or uuid of the port
+        :type port:       string or uuid.UUID
+        :param networks:  One or more IP address/netmask to assign to the port
+        :type networks:   list or string
+        :param may_exist: If True, don't fail if the networks already exists
+        :type may_exist:  boolean
+        :returns:         :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
+    def lrp_del_networks(self, port, networks, if_exists=False):
+        """Remove a network from 'port'
+
+        :param port:      The name or uuid of the port
+        :type port:       string or uuid.UUID
+        :param networks:  One or more IP address/netmask to remove from
+                          the port
+        :type networks:   list or string
+        :param if_exists: If True, don't fail if the networks doesn't exist
+        :type if_exists:  boolean
+        :returns:         :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
     def lr_route_add(self, router, prefix, nexthop, port=None,
                      policy='dst-ip', may_exist=False):
         """Add a route to 'router'
@@ -884,6 +911,88 @@ class API(api.API, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def lb_list(self):
         """Get the UUIDs of all load balanacers"""
+
+    @abc.abstractmethod
+    def lb_get(self, lb):
+        """Get load balancer for 'lb'
+
+        :returns: :class:`Command` with RowView result
+        """
+
+    @abc.abstractmethod
+    def lb_add_health_check(self, lb, vip, **options):
+        """Add health check for 'lb'
+
+        :param lb:      The name or uuid of a load balancer
+        :type lb:       string or uuid.UUID
+        :param vip:     A virtual IP
+        :type vip:      string
+        :param options: keys and values for the port 'options' dict
+        :type options:  key: string, value: string
+        :returns:       :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
+    def lb_del_health_check(self, lb, hc_uuid, if_exists=False):
+        """Remove health check from 'lb'
+
+        :param lb:        The name or uuid of a load balancer
+        :type lb:         string or uuid.UUID
+        :param hc_uuid:   uuid of a health check
+        :type hc_uuid:    uuid.UUID
+        :param if_exists: If True, don't fail if the hc_uuid doesn't exist
+        :type if_exists:  boolean
+        :returns:         :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
+    def lb_add_ip_port_mapping(self, lb, endpoint_ip, port_name, source_ip):
+        """Add IP port mapping to 'lb'
+
+        Maps from endpoint IP to a colon-separated pair of logical port name
+        and source IP, e.g. port_name:sourc_ip.
+
+        :param lb:          The name or uuid of a load balancer
+        :type lb:           string or uuid.UUID
+        :param endpoint_ip: IPv4 address
+        :type endpoint_ip:  string
+        :param port_name:   The name of a logical port
+        :type port_name:    string
+        :param source_ip:   IPv4 address
+        :type source_ip:    string
+        :returns:           :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
+    def lb_del_ip_port_mapping(self, lb, endpoint_ip):
+        """Remove IP port mapping from 'lb'
+
+        :param lb:          The name or uuid of a load balancer
+        :type lb:           string or uuid.UUID
+        :param endpoint_ip: IPv4 address
+        :type endpoint_ip:  string
+        :returns:           :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
+    def health_check_set_options(self, hc_uuid, **options):
+        """Set options to the 'health_check'
+
+        :param hc_uuid: uuid of the health check
+        :type hc_uuid:  uuid.UUID
+        :param options: keys and values for the port 'options' dict
+        :type options:  key: string, value: string
+        :returns:       :class:`Command` with no result
+        """
+
+    @abc.abstractmethod
+    def health_check_get_options(self, hc_uuid):
+        """Get the options for 'health_check'
+
+        :param hc_uuid: uuid of the health check
+        :type hc_uuid:  uuid.UUID
+        :returns:       :class:`Command` with dict result
+        """
 
     @abc.abstractmethod
     def lr_lb_add(self, router, lb, may_exist=False):
