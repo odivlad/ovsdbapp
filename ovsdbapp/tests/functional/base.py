@@ -31,14 +31,12 @@ class FunctionalTestCase(base.TestCase):
             tempfile.mkdtemp(),
             ovsdir=os.getenv('OVS_SRCDIR'),
             ovndir=os.getenv('OVN_SRCDIR'),
-            vtepdir=os.getenv('VTEP_SRCDIR'),
             remove=not bool(os.getenv('KEEP_VENV')))
         atexit.register(cls.ovsvenv.cleanUp)
         cls.ovsvenv.setUp()
         cls.schema_map = {'Open_vSwitch': cls.ovsvenv.ovs_connection,
                           'OVN_Northbound': cls.ovsvenv.ovnnb_connection,
                           'OVN_Southbound': cls.ovsvenv.ovnsb_connection,
-                          'hardware_vtep': cls.ovsvenv.ovs_connection,
                           }
         cls.ovsvenvlog = None
         if os.getenv('KEEP_VENV') and os.getenv('VIRTUAL_ENV'):
