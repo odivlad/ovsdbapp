@@ -226,6 +226,12 @@ class OvnNbApiIdlImpl(ovs_idl.Backend, api.API):
         return cmd.LrpDelGatewayChassisCommand(self, port,
                                                gateway_chassis, if_exists)
 
+    def lrp_add_networks(self, port, networks, may_exist=False):
+        return cmd.LrpAddNetworksCommand(self, port, networks, may_exist)
+
+    def lrp_del_networks(self, port, networks, if_exists=False):
+        return cmd.LrpDelNetworksCommand(self, port, networks, if_exists)
+
     def lr_route_add(self, router, prefix, nexthop, port=None,
                      policy='dst-ip', route_table=None, may_exist=False):
         return cmd.LrRouteAddCommand(self, router, prefix, nexthop, port,
@@ -272,6 +278,28 @@ class OvnNbApiIdlImpl(ovs_idl.Backend, api.API):
 
     def lb_list(self):
         return cmd.LbListCommand(self)
+
+    def lb_get(self, lb):
+        return cmd.LbGetCommand(self, lb)
+
+    def lb_add_health_check(self, lb, vip, **options):
+        return cmd.LbAddHealthCheckCommand(self, lb, vip, **options)
+
+    def lb_del_health_check(self, lb, hc_uuid, if_exists=False):
+        return cmd.LbDelHealthCheckCommand(self, lb, hc_uuid, if_exists)
+
+    def lb_add_ip_port_mapping(self, lb, endport_ip, port_name, source_ip):
+        return cmd.LbAddIpPortMappingСommand(self, lb, endport_ip,
+                                             port_name, source_ip)
+
+    def lb_del_ip_port_mapping(self, lb, endport_ip):
+        return cmd.LbDelIpPortMappingCommand(self, lb, endport_ip)
+
+    def health_check_set_options(self, hc_uuid, **options):
+        return cmd.HealthCheckSetOptionsCommand(self, hc_uuid, **options)
+
+    def health_check_get_options(self, hc_uuid):
+        return cmd.HealthCheckGetOptionsCommand(self, hc_uuid)
 
     def lr_lb_add(self, router, lb, may_exist=False):
         return cmd.LrLbAddCommand(self, router, lb, may_exist)

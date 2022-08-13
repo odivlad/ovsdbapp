@@ -187,7 +187,9 @@ class API(api.API, metaclass=abc.ABCMeta):
 
         :param switch: The name of the switch
         :type switch:  string or uuid.UUID
-        :returns:      :class:`Command` with RowView list result
+        :returns:      :class:`Command` with list of RowView lists result.
+                       First list contains 'Ucast_Macs_Local' table records,
+                       second list contains 'Mcast_Macs_Local' table records.
         """
 
     @abc.abstractmethod
@@ -196,7 +198,9 @@ class API(api.API, metaclass=abc.ABCMeta):
 
         :param switch: The name of the switch
         :type switch:  string or uuid.UUID
-        :returns:      :class:`Command` with RowView list result
+        :returns:      :class:`Command` with list of RowView lists result.
+                       First list contains 'Ucast_Macs_Remote' table records,
+                       second list contains 'Mcast_Macs_Remote' table records.
         """
 
     @abc.abstractmethod

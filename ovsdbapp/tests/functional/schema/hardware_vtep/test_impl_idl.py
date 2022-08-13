@@ -22,8 +22,17 @@ from ovsdbapp.tests import utils
 
 class HardwareVtepTest(base.FunctionalTestCase):
     schemas = ["hardware_vtep"]
+    fixture_class = base.venv.OvsVtepVenvFixture
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.schema_map = cls.schema_map.copy()
+        cls.schema_map['hardware_vtep'] = cls.ovsvenv.ovs_connection
 
     def setUp(self):
+        if not self.ovsvenv.has_vtep:
+            self.skipTest("Installed version of OVS does not support VTEP")
         super().setUp()
         self.api = self.useFixture(
             fixtures.HwVtepApiFixture(self.connection)).obj
