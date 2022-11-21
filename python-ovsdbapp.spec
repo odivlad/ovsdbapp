@@ -10,6 +10,12 @@ A library for writing Open vSwitch OVSDB-based applications.
 Python OVSDB Application Library tests. \
 This package contains Python OVSDB Application Library test files.
 
+%if 0%{?el8}
+%global el_python3_pkgversion 3
+%else
+%global el_python3_pkgversion 36
+%endif
+
 %bcond_with tests
 
 Name:       python-%{library}
@@ -28,17 +34,16 @@ BuildRequires:  git
 %package -n python3-%{library}
 Summary:    Python OVSDB Application Library
 Requires:   python3-openvswitch
-Requires:   python36-pbr
-Requires:   python36-netaddr >= 0.7.18
-Provides:   python36-%{library}
+Requires:   python%{el_python3_pkgversion}-pbr
+Requires:   python%{el_python3_pkgversion}-netaddr >= 0.7.18
 Obsoletes:  python36-ovsdbapp < %{version}
 
 BuildRequires:  python%{python3_pkgversion}-devel
-BuildRequires:  python36-pbr
 BuildRequires:  python%{python3_pkgversion}-setuptools
-BuildRequires:  python36-mock
+BuildRequires:  python%{el_python3_pkgversion}-pbr
+BuildRequires:  python%{el_python3_pkgversion}-mock
+BuildRequires:  python%{el_python3_pkgversion}-netaddr >= 0.7.18
 BuildRequires:  python3-openvswitch
-BuildRequires:  python36-netaddr >= 0.7.18
 
 %description -n python3-%{library}
 %{common_desc}
