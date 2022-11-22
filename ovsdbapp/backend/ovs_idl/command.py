@@ -13,6 +13,7 @@
 #    under the License.
 
 import collections
+import time
 from collections import abc
 import logging
 
@@ -91,7 +92,25 @@ class AddCommand(BaseCommand):
             # be called even if *this* command caused no change. Theoretically
             # the subclass should have set a UUID/RowView result in that case
             # which is handled above, so raise exception if real_uuid not found
-            row = self.api.tables[self.table_name].rows[real_uuid]
+            row = None
+            timeout = self.api.update_timeout
+            stop = time.time() + timeout if timeout else None
+
+            while not row:
+                try:
+                    row = self.api.tables[self.table_name].rows[real_uuid]
+                except KeyError as e:
+                    msg = ("Inserted row '%s' not found in "
+                           "in-memory database" % (real_uuid))
+
+                    if not timeout:
+                        raise RuntimeError(msg) from e
+
+                    if stop and time.time() > stop:
+                        raise RuntimeError(msg) from e
+
+                    time.sleep(1)
+
         self.result = rowview.RowView(row)
 
 

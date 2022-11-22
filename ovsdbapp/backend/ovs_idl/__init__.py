@@ -27,6 +27,7 @@ class Backend(object):
     _ovsdb_connection = None
 
     def __init__(self, connection, start=True, auto_index=True, **kwargs):
+        self.update_timeout = kwargs.pop("update_timeout", None)
         super().__init__(**kwargs)
         self.ovsdb_connection = connection
         if auto_index:
