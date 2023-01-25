@@ -20,7 +20,7 @@ This package contains Python OVSDB Application Library test files.
 
 Name:       python-%{library}
 Version:    2.1.0
-Release:    1.CROC2@BUILDID@%{?dist}
+Release:    1.CROC3@BUILDID@%{?dist}
 Summary:    Python OVSDB Application Library
 License:    ASL 2.0
 URL:        http://launchpad.net/%{library}/
