@@ -30,7 +30,15 @@ class BaseCommand(api.Command):
 
     def __init__(self, api):
         self.api = api
-        self.result = None
+        self._result = None
+
+    @property
+    def result(self):
+        return self._result
+
+    @result.setter
+    def result(self, value):
+        self._result = value
 
     def execute(self, check_error=False, log_errors=True, **kwargs):
         try:
@@ -129,14 +137,22 @@ class DbDestroyCommand(BaseCommand):
 
 
 class DbSetCommand(BaseCommand):
-    def __init__(self, api, table, record, *col_values):
+    def __init__(self, api, table, record, *col_values, if_exists=False,
+                 **columns):
         super().__init__(api)
         self.table = table
         self.record = record
-        self.col_values = col_values
+        self.col_values = col_values or columns.items()
+        self.if_exists = if_exists
 
     def run_idl(self, txn):
-        record = self.api.lookup(self.table, self.record)
+        try:
+            record = self.api.lookup(self.table, self.record)
+        except idlutils.RowNotFound:
+            if self.if_exists:
+                return
+            raise
+
         for col, val in self.col_values:
             if isinstance(val, abc.Mapping):
                 # TODO(twilson) This is to make a unit/functional test that

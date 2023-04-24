@@ -41,6 +41,11 @@ class TestLogicalSwitchOps(OvnNorthboundTest):
         self.assertIn(fix.obj.uuid, self.table.rows)
         return fix.obj
 
+    def _lsp_add(self, switch, name, *args, **kwargs):
+        name = utils.get_rand_device_name() if name is None else name
+        self.api.lsp_add(switch.uuid, name, *args, **kwargs).execute(
+            check_error=True)
+
     def _test_ls_get(self, col):
         ls = self._ls_add(switch=utils.get_rand_device_name())
         val = getattr(ls, col)
@@ -101,6 +106,30 @@ class TestLogicalSwitchOps(OvnNorthboundTest):
         switches = {self._ls_add() for _ in range(3)}
         switch_set = set(self.api.ls_list().execute(check_error=True))
         self.assertTrue(switches.issubset(switch_set))
+
+    def test_ls_get_localnet_ports(self):
+        ls = self._ls_add()
+        self._lsp_add(ls, None, type=const.LOCALNET)
+        localnet_ports = self.api.ls_get_localnet_ports(ls.uuid).execute(
+            check_error=True)
+        self.assertEqual(ls.ports, localnet_ports)
+
+    def test_ls_get_localnet_ports_no_ports(self):
+        ls = self._ls_add()
+        localnet_ports = self.api.ls_get_localnet_ports(ls.uuid).execute(
+            check_error=True)
+        self.assertEqual([], localnet_ports)
+
+    def test_ls_get_localnet_ports_no_exist(self):
+        name = utils.get_rand_device_name()
+        cmd = self.api.ls_get_localnet_ports(name)
+        self.assertRaises(RuntimeError, cmd.execute, check_error=True)
+
+    def test_ls_get_localnet_ports_if_exists(self):
+        name = utils.get_rand_device_name()
+        localnet_ports = self.api.ls_get_localnet_ports(
+            name, if_exists=True).execute(check_error=True)
+        self.assertEqual([], localnet_ports)
 
 
 class TestAclOps(OvnNorthboundTest):
@@ -2192,6 +2221,37 @@ class TestHAChassisGroup(OvnNorthboundTest):
             check_error=True)
         self.assertEqual([], hcg.ha_chassis)
 
+    def test_ha_chassis_group_add_delete_chassis_within_txn(self):
+        with self.api.create_transaction(check_error=True) as txn:
+            hcg_cmd = txn.add(self.api.ha_chassis_group_add(self.hcg_name))
+            priority = 20
+            txn.add(self.api.ha_chassis_group_add_chassis(
+                hcg_cmd, self.chassis, priority))
+
+        # Assert that the HA Chassis entry was created
+        hcg = self.api.ha_chassis_group_get(self.hcg_name).execute(
+            check_error=True)
+        hc = self.api.db_find(
+            'HA_Chassis',
+            ('chassis_name', '=', self.chassis)).execute(check_error=True)
+        self.assertEqual(priority, hc[0]['priority'])
+        ha_chassis_uuid_list = [hc.uuid for hc in hcg.ha_chassis]
+        self.assertEqual(ha_chassis_uuid_list, [hc[0]['_uuid']])
+
+        with self.api.create_transaction(check_error=True) as txn:
+            hcg_cmd = txn.add(self.api.ha_chassis_group_add(self.hcg_name,
+                                                            may_exist=True))
+            txn.add(self.api.ha_chassis_group_del_chassis(hcg_cmd,
+                                                          self.chassis))
+
+        hcg = self.api.ha_chassis_group_get(self.hcg_name).execute(
+            check_error=True)
+        ha = self.api.db_find(
+            'HA_Chassis',
+            ('chassis_name', '=', self.chassis)).execute(check_error=True)
+        self.assertEqual([], ha)
+        self.assertEqual([], hcg.ha_chassis)
+
     def test_ha_chassis_group_if_exists(self):
         self.api.ha_chassis_group_add(self.hcg_name).execute(check_error=True)
         self.api.ha_chassis_group_add_chassis(
@@ -2364,3 +2424,105 @@ class TestMeterOps(OvnNorthboundTest):
 
     def test_meter_get_name(self):
         self._meter_get('name')
+
+
+class TestBFDOps(OvnNorthboundTest):
+
+    def setUp(self):
+        super(TestBFDOps, self).setUp()
+        self.table = self.api.tables['BFD']
+
+    def _bfd_add(self, *args, **kwargs):
+        cmd = self.api.bfd_add(*args, **kwargs)
+        row = cmd.execute(check_error=True)
+        self.assertEqual(cmd.logical_port, row.logical_port)
+        self.assertEqual(cmd.dst_ip, row.dst_ip)
+        self.assertEqual(cmd.columns['min_tx'] if cmd.columns[
+            'min_tx'] else [], row.min_tx)
+        self.assertEqual(cmd.columns['min_rx'] if cmd.columns[
+            'min_rx'] else [], row.min_rx)
+        self.assertEqual(cmd.columns['detect_mult'] if cmd.columns[
+            'detect_mult'] else [], row.detect_mult)
+        self.assertEqual(cmd.columns['external_ids'] or {}, row.external_ids)
+        self.assertEqual(cmd.columns['options'] or {}, row.options)
+        return idlutils.frozen_row(row)
+
+    def test_bfd_add(self):
+        name = utils.get_rand_name()
+        self._bfd_add(name, name)
+
+    def test_bfd_add_non_defaults(self):
+        name = utils.get_rand_name()
+        self._bfd_add(
+            name,
+            name,
+            min_rx=1,
+            min_tx=2,
+            detect_mult=3,
+            external_ids={'a': 'A'},
+            options={'b': 'B'},
+            may_exist=True,
+        )
+
+    def test_bfd_add_duplicate(self):
+        name = utils.get_rand_name()
+        cmd = self.api.bfd_add(name, name)
+        cmd.execute(check_error=True)
+        self.assertRaises(RuntimeError, cmd.execute, check_error=True)
+
+    def test_bfd_add_may_exist_no_change(self):
+        name = utils.get_rand_name()
+        b1 = self._bfd_add(name, name)
+        b2 = self._bfd_add(name, name, may_exist=True)
+        self.assertEqual(b1, b2)
+
+    def test_bfd_add_may_exist_change(self):
+        name = utils.get_rand_name()
+        b1 = self._bfd_add(name, name)
+        b2 = self._bfd_add(
+            name,
+            name,
+            min_rx=11,
+            min_tx=22,
+            detect_mult=33,
+            external_ids={'aa': 'AA'},
+            options={'bb': 'BB'},
+            may_exist=True,
+        )
+        self.assertNotEqual(b1, b2)
+        self.assertEqual(b1.uuid, b2.uuid)
+
+    def test_bfd_del(self):
+        name = utils.get_rand_name()
+        b1 = self._bfd_add(name, name)
+        self.assertIn(b1.uuid, self.table.rows)
+        self.api.bfd_del(b1.uuid).execute(check_error=True)
+        self.assertNotIn(b1.uuid, self.table.rows)
+
+    def test_bfd_find(self):
+        name1 = utils.get_rand_name()
+        name2 = utils.get_rand_name()
+        b1 = self._bfd_add(name1, name1)
+        b2 = self._bfd_add(name1, name2)
+        b3 = self._bfd_add(name2, name1)
+        b4 = self._bfd_add(name2, name2)
+        self.assertIn(b1.uuid, self.table.rows)
+        self.assertIn(b2.uuid, self.table.rows)
+        self.assertIn(b3.uuid, self.table.rows)
+        self.assertIn(b4.uuid, self.table.rows)
+        found = self.api.bfd_find(
+            b1.logical_port,
+            b1.dst_ip).execute(check_error=True)
+        self.assertEqual(1, len(found))
+        self.assertEqual(b1.uuid, found[0].uuid)
+        for col in set(self.api.tables['BFD'].columns.keys()) - set(
+                ('_uuid', 'status')):
+            self.assertEqual(
+                getattr(b1, col),
+                getattr(found[0], col))
+
+    def test_bfd_get(self):
+        name = utils.get_rand_name()
+        b1 = self.api.bfd_add(name, name).execute(check_error=True)
+        b2 = self.api.bfd_get(b1.uuid).execute(check_error=True)
+        self.assertEqual(b1, b2)

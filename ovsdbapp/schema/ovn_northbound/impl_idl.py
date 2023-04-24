@@ -53,6 +53,9 @@ class OvnNbApiIdlImpl(ovs_idl.Backend, api.API):
         return self.db_remove('Logical_Switch', switch_uuid, 'dns_records',
                               dns_uuid, if_exists=if_exists)
 
+    def ls_get_localnet_ports(self, switch, if_exists=False):
+        return cmd.LSGetLocalnetPortsCommand(self, switch, if_exists)
+
     def acl_add(self, switch, direction, priority, match, action, log=False,
                 may_exist=False, **external_ids):
         return cmd.AclAddCommand(self, switch, direction, priority,
@@ -289,7 +292,7 @@ class OvnNbApiIdlImpl(ovs_idl.Backend, api.API):
         return cmd.LbDelHealthCheckCommand(self, lb, hc_uuid, if_exists)
 
     def lb_add_ip_port_mapping(self, lb, endport_ip, port_name, source_ip):
-        return cmd.LbAddIpPortMappingСommand(self, lb, endport_ip,
+        return cmd.LbAddIpPortMappingCommand(self, lb, endport_ip,
                                              port_name, source_ip)
 
     def lb_del_ip_port_mapping(self, lb, endport_ip):
@@ -412,3 +415,20 @@ class OvnNbApiIdlImpl(ovs_idl.Backend, api.API):
 
     def meter_get(self, meter):
         return cmd.MeterGetCommand(self, meter)
+
+    def bfd_add(self, logical_port, dst_ip, min_tx=None, min_rx=None,
+                detect_mult=None, external_ids=None, options=None,
+                may_exist=False):
+        return cmd.BFDAddCommand(self, logical_port, dst_ip, min_tx=min_tx,
+                                 min_rx=min_rx, detect_mult=detect_mult,
+                                 external_ids=external_ids, options=options,
+                                 may_exist=may_exist)
+
+    def bfd_del(self, uuid):
+        return cmd.BFDDelCommand(self, uuid)
+
+    def bfd_find(self, logical_port, dst_ip):
+        return cmd.BFDFindCommand(self, logical_port, dst_ip)
+
+    def bfd_get(self, uuid):
+        return cmd.BFDGetCommand(self, uuid)

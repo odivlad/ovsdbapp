@@ -13,8 +13,10 @@
 import logging
 import uuid
 
+from ovs.db import idl
 from ovsdbapp.backend.ovs_idl import command as cmd
 from ovsdbapp.backend.ovs_idl import idlutils
+from ovsdbapp.backend.ovs_idl import rowview
 from ovsdbapp.backend.ovs_idl import transaction
 from ovsdbapp import exceptions
 
@@ -142,8 +144,9 @@ class Backend(object):
     def db_destroy(self, table, record):
         return cmd.DbDestroyCommand(self, table, record)
 
-    def db_set(self, table, record, *col_values):
-        return cmd.DbSetCommand(self, table, record, *col_values)
+    def db_set(self, table, record, *col_values, if_exists=True, **columns):
+        return cmd.DbSetCommand(self, table, record, *col_values,
+                                if_exists=if_exists, **columns)
 
     def db_add(self, table, record, column, *values):
         return cmd.DbAddCommand(self, table, record, column, *values)
@@ -190,7 +193,11 @@ class Backend(object):
 
         # Handle commands by simply returning its result
         if isinstance(record, cmd.BaseCommand):
-            return record.result
+            if isinstance(record.result, (rowview.RowView, idl.Row)):
+                # In case the command (creation) returns an existing record.
+                return record.result
+            else:
+                record = record.result
 
         t = self.tables[table]
         if isinstance(record, uuid.UUID):

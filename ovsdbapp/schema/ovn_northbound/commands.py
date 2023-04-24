@@ -80,6 +80,28 @@ class LsGetCommand(cmd.BaseGetRowCommand):
     table = 'Logical_Switch'
 
 
+class LSGetLocalnetPortsCommand(cmd.ReadOnlyCommand):
+    def __init__(self, api, switch, if_exists=False):
+        super().__init__(api)
+        self.switch = switch
+        self.if_exists = if_exists
+
+    def localnet_port(self, row):
+        return row.type == const.LOCALNET
+
+    def run_idl(self, txn):
+        try:
+            lswitch = self.api.lookup('Logical_Switch', self.switch)
+            self.result = [rowview.RowView(p) for p in lswitch.ports
+                           if self.localnet_port(p)]
+        except idlutils.RowNotFound as e:
+            if self.if_exists:
+                self.result = []
+                return
+            msg = "Logical Switch %s does not exist" % self.switch
+            raise RuntimeError(msg) from e
+
+
 class _AclAddHelper(cmd.AddCommand):
     table_name = 'ACL'
 
@@ -1023,6 +1045,98 @@ class LrpDelNetworksCommand(_LrpNetworksCommand):
             lrp.delvalue('networks', network)
 
 
+class BFDFindCommand(cmd.DbFindCommand):
+    table = 'BFD'
+
+    def __init__(self, api, port, dst_ip):
+        super().__init__(
+            api,
+            self.table,
+            ('logical_port', '=', port),
+            ('dst_ip', '=', dst_ip),
+            row=True,
+        )
+
+
+class BFDAddCommand(cmd.AddCommand):
+    # cmd.AddCommand uses self.table_name, other base commands use self.table
+    table_name = 'BFD'
+
+    def __init__(self, api, logical_port, dst_ip, min_tx=None, min_rx=None,
+                 detect_mult=None, external_ids=None, options=None,
+                 may_exist=False):
+        for attr in ('logical_port', 'dst_ip'):
+            if not isinstance(locals().get(attr), str):
+                raise ValueError("%s must be of type str" % attr)
+        for attr in ('min_tx', 'min_rx', 'detect_mult'):
+            value = locals().get(attr)
+            if value and (not isinstance(value, int) or value < 1):
+                raise ValueError("%s must be of type int and > 0" % attr)
+        for attr in ('external_ids', 'options'):
+            value = locals().get(attr)
+            if value and not isinstance(value, dict):
+                raise ValueError("%s must be of type dict" % attr)
+        super().__init__(api)
+        self.logical_port = logical_port
+        self.dst_ip = dst_ip
+        self.columns = {
+            'logical_port': logical_port,
+            'dst_ip': dst_ip,
+            'min_tx': [min_tx] if min_tx else [],
+            'min_rx': [min_rx] if min_rx else [],
+            'detect_mult': [detect_mult] if detect_mult else [],
+            'external_ids': external_ids or {},
+            'options': options or {},
+        }
+        self.may_exist = may_exist
+
+    def run_idl(self, txn):
+        cmd = BFDFindCommand(self.api, self.logical_port, self.dst_ip)
+        cmd.run_idl(txn)
+        bfd_result = cmd.result
+        if bfd_result:
+            if len(bfd_result) > 1:
+                # With the current database schema, this cannot happen, but
+                # better safe than sorry.
+                raise RuntimeError(
+                    "Unexpected duplicates in database for port %s "
+                    "and dst_ip %s" % (self.logical_port, self.dst_ip))
+            bfd = bfd_result[0]
+            if self.may_exist:
+                self.set_columns(bfd, **self.columns)
+                # When no changes are made to a record, the parent
+                # `post_commit` method will not be called.
+                #
+                # Ensure consistent return to caller of `Command.execute()`
+                # even when no changes have been applied.
+                self.result = rowview.RowView(bfd)
+                return
+            else:
+                raise RuntimeError(
+                    "BFD entry for port %s and dst_ip %s exists" % (
+                        self.logical_port, self.dst_ip))
+        bfd = txn.insert(self.api.tables[self.table_name])
+        bfd.logical_port = self.logical_port
+        bfd.dst_ip = self.dst_ip
+        self.set_columns(bfd, **self.columns)
+        # Setting the result to something other than a :class:`rowview.RowView`
+        # or :class:`ovs.db.idl.Row` typed value will make the parent
+        # `post_commit` method retrieve the newly insterted row from IDL and
+        # return that to the caller.
+        self.result = bfd.uuid
+
+
+class BFDDelCommand(cmd.DbDestroyCommand):
+    table = 'BFD'
+
+    def __init__(self, api, uuid):
+        super().__init__(api, self.table, uuid)
+
+
+class BFDGetCommand(cmd.BaseGetRowCommand):
+    table = 'BFD'
+
+
 class LrRouteAddCommand(cmd.BaseCommand):
     def __init__(self, api, router, prefix, nexthop, port=None,
                  policy='dst-ip', route_table=None, may_exist=False):
@@ -1438,7 +1552,7 @@ class LbDelHealthCheckCommand(cmd.BaseCommand):
             raise RuntimeError(msg)
 
 
-class LbAddIpPortMappingСommand(cmd.BaseCommand):
+class LbAddIpPortMappingCommand(cmd.BaseCommand):
     table = 'Load_Balancer'
 
     def __init__(self, api, lb, endpoint_ip, port_name, source_ip):
@@ -1479,7 +1593,7 @@ class HealthCheckAddCommand(cmd.AddCommand):
         hc = txn.insert(self.api.tables[self.table_name])
         hc.vip = self.vip
         hc.options = self.options
-        self.result = hc
+        self.result = hc.uuid
 
 
 class HealthCheckSetOptionsCommand(cmd.BaseSetOptionsCommand):
@@ -1769,7 +1883,7 @@ class GatewayChassisAddCommand(cmd.AddCommand):
         gwc.chassis_name = self.chassis_name
         gwc.priority = self.priority
         self.set_columns(gwc, **self.columns)
-        self.result = gwc
+        self.result = gwc.uuid
 
 
 class HAChassisGroupAddCommand(cmd.AddCommand):
@@ -1824,16 +1938,15 @@ class HAChassisGroupAddChassisCommand(cmd.AddCommand):
 
     def __init__(self, api, hcg_id, chassis, priority, **columns):
         super().__init__(api)
-        self.hcg_id = hcg_id
+        self.hcg = hcg_id
         self.chassis = chassis
         self.priority = priority
         self.columns = columns
 
     def run_idl(self, txn):
-        hc_group = self.api.lookup('HA_Chassis_Group', self.hcg_id)
+        hc_group = self.api.lookup('HA_Chassis_Group', self.hcg)
         found = False
-        hc = None
-        for hc in hc_group.ha_chassis:
+        for hc in getattr(hc_group, 'ha_chassis', []):
             if hc.chassis_name != self.chassis:
                 continue
             found = True
@@ -1855,26 +1968,29 @@ class HAChassisGroupDelChassisCommand(cmd.BaseCommand):
 
     def __init__(self, api, hcg_id, chassis, if_exists=False):
         super().__init__(api)
-        self.hcg_id = hcg_id
+        self.hcg = hcg_id
         self.chassis = chassis
         self.if_exists = if_exists
 
     def run_idl(self, txn):
         try:
-            hc_group = self.api.lookup('HA_Chassis_Group', self.hcg_id)
-        except idlutils.RowNotFound:
+            hc_group = self.api.lookup('HA_Chassis_Group', self.hcg)
+        except idlutils.RowNotFound as exc:
             if self.if_exists:
                 return
 
+            raise RuntimeError('HA Chassis Group %s does not exist' %
+                               utils.get_uuid(self.hcg)) from exc
+
         hc = None
-        for hc in hc_group.ha_chassis:
+        for hc in getattr(hc_group, 'ha_chassis', []):
             if hc.chassis_name == self.chassis:
                 break
         else:
             if self.if_exists:
                 return
             raise RuntimeError(
-                'HA Chassis %s does not exist' % self.hcg_id)
+                'HA Chassis %s does not exist' % utils.get_uuid(self.hcg))
 
         hc_group.delvalue('ha_chassis', hc)
         hc.delete()
