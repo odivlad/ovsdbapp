@@ -241,8 +241,9 @@ class OvnNbApiIdlImpl(ovs_idl.Backend, api.API):
         return cmd.LrRouteAddCommand(self, router, prefix, nexthop, port,
                                      policy, route_table, may_exist, ecmp)
 
-    def lr_route_del(self, router, prefix=None, route_table=None, if_exists=False):
-        return cmd.LrRouteDelCommand(self, router, prefix, route_table, if_exists)
+    def lr_route_del(self, router, prefix=None, route_table=None,
+                     nexthop=None, if_exists=False):
+        return cmd.LrRouteDelCommand(self, router, prefix, route_table, nexthop, if_exists)
 
     def lr_route_list(self, router, route_table=None):
         return cmd.LrRouteListCommand(self, router, route_table)
