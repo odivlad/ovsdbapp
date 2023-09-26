@@ -853,7 +853,7 @@ class LrpAddCommand(cmd.BaseCommand):
         self.networks = [str(netaddr.IPNetwork(net)) for net in networks]
         self.router = router
         self.port = port
-        self.peer = peer
+        self.peer = peer if peer else []
         self.may_exist = may_exist
         self.columns = columns
         super().__init__(api)
@@ -1139,7 +1139,7 @@ class BFDGetCommand(cmd.BaseGetRowCommand):
 
 class LrRouteAddCommand(cmd.BaseCommand):
     def __init__(self, api, router, prefix, nexthop, port=None,
-                 policy='dst-ip', route_table=None, may_exist=False):
+                 policy='dst-ip', route_table=None, may_exist=False, ecmp=False):
         prefix = str(netaddr.IPNetwork(prefix))
         if nexthop != const.ROUTE_DISCARD:
             nexthop = str(netaddr.IPAddress(nexthop))
@@ -1150,6 +1150,7 @@ class LrRouteAddCommand(cmd.BaseCommand):
         self.port = port
         self.policy = policy
         self.route_table = route_table or ""
+        self.ecmp = ecmp
         self.may_exist = may_exist
 
     def run_idl(self, txn):
@@ -1160,6 +1161,8 @@ class LrRouteAddCommand(cmd.BaseCommand):
                 self.route_table == route.route_table and
                 "ic-learned-route" not in route.external_ids
             ):
+                if self.ecmp and self.nexthop != route.nexthop:
+                    continue
                 if not self.may_exist:
                     msg = "Route %s already exists on router %s" % (
                         self.prefix, self.router)
