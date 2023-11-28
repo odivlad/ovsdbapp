@@ -956,14 +956,18 @@ class TestLogicalRouterOps(OvnNorthboundTest):
         self.assertTrue(lrs.issubset(lr_set), "%s vs %s" % (lrs, lr_set))
 
     def _lr_add_route(self, router=None, prefix=None, nexthop=None, port=None,
+                      ecmp=False, route_table=const.MAIN_ROUTE_TABLE,
                       **kwargs):
         lr = self._lr_add(router or utils.get_rand_device_name(),
                           may_exist=True)
         prefix = prefix or '192.0.2.0/25'
         nexthop = nexthop or '192.0.2.254'
         port = port or "port_name"
-        sr = self.api.lr_route_add(lr.uuid, prefix, nexthop, port,
-                                   **kwargs).execute(check_error=True)
+        sr = self.api.lr_route_add(
+            lr.uuid, prefix, nexthop, port,
+            ecmp=ecmp, route_table=route_table,
+            **kwargs
+        ).execute(check_error=True)
         self.assertIn(sr, lr.static_routes)
         self.assertEqual(prefix, sr.ip_prefix)
         self.assertEqual(nexthop, sr.nexthop)
@@ -992,10 +996,44 @@ class TestLogicalRouterOps(OvnNorthboundTest):
         self._lr_add_route(router_name)
         self._lr_add_route(router_name, may_exist=True)
 
+    def test_lr_route_add_exists_ecmp(self):
+        router_name = utils.get_rand_device_name()
+        self._lr_add_route(router_name)
+        self._lr_add_route(router=router_name, nexthop='192.0.3.254',
+                           ecmp=True)
+
     def test_lr_route_add_discard(self):
         self._lr_add_route(nexthop=const.ROUTE_DISCARD)
         self.assertRaises(netaddr.AddrFormatError, self._lr_add_route,
                           prefix='not-discard')
+
+    def test_lr_route_add_route_table(self):
+        lr = self._lr_add()
+        route_table = "route-table"
+
+        # add route to 'main' route table
+        route = self._lr_add_route(lr.name)
+        self.assertEqual(route.route_table, const.MAIN_ROUTE_TABLE)
+
+        route = self._lr_add_route(lr.name, route_table=route_table)
+        self.assertEqual(route.route_table, route_table)
+
+        self.assertEqual(
+            len(self.api.tables['Logical_Router_Static_Route'].rows), 2)
+
+    def test_lr_route_add_learned_route_exist(self):
+        router_name = utils.get_rand_device_name()
+
+        learned_route = self._lr_add_route(router_name)
+        self.api.db_set(
+            'Logical_Router_Static_Route', learned_route.uuid,
+            ('external_ids', {'ic-learned-route': str(uuid.uuid4())})).execute(
+                check_error=True)
+
+        route = self._lr_add_route(router_name)
+
+        self.assertNotEqual(learned_route.uuid, route.uuid)
+        self.assertNotIn("ic-learned-route", route.external_ids)
 
     def test_lr_route_del(self):
         prefix = "192.0.2.0/25"
@@ -1025,6 +1063,55 @@ class TestLogicalRouterOps(OvnNorthboundTest):
         self.api.lr_route_del(lr.uuid, '192.0.2.0/25', if_exists=True).execute(
             check_error=True)
 
+    def test_lr_route_del_ecmp(self):
+        prefix = "10.0.0.0/24"
+        nexthop1 = "1.1.1.1"
+        nexthop2 = "2.2.2.2"
+        lr = self._lr_add()
+
+        self._lr_add_route(lr.uuid, prefix=prefix, nexthop=nexthop1)
+        ecmp_route = self._lr_add_route(lr.uuid, prefix=prefix,
+                                        nexthop=nexthop2, ecmp=True)
+        self.assertEqual(
+            len(self.api.tables['Logical_Router_Static_Route'].rows), 2)
+
+        self.api.lr_route_del(lr.uuid, prefix, nexthop=nexthop2).execute(
+            check_error=True)
+
+        self.assertNotIn(
+            ecmp_route.uuid,
+            len(self.api.tables['Logical_Router_Static_Route'].rows),
+        )
+
+        cmd = self.api.lr_route_del(lr.uuid, prefix, nexthop=nexthop2)
+        self.assertRaises(RuntimeError, cmd.execute, check_error=True)
+
+        self.assertEqual(
+            len(self.api.tables['Logical_Router_Static_Route'].rows), 1)
+
+    def test_lr_route_del_route_table(self):
+        lr = self._lr_add()
+        route_table = "route-table"
+
+        route_in_main = self._lr_add_route(lr.uuid, prefix="10.0.0.0/24")
+        route = self._lr_add_route(
+            lr.uuid, prefix="10.0.1.0/24", route_table=route_table)
+
+        self.assertEqual(len(lr.static_routes), 2)
+
+        # try to delete from the 'main' table implicitly
+        cmd = self.api.lr_route_del(lr.uuid, route.ip_prefix)
+        self.assertRaises(RuntimeError, cmd.execute, check_error=True)
+
+        self.api.lr_route_del(
+            lr.uuid, prefix=route.ip_prefix, route_table=route_table
+        ).execute(check_error=True)
+        self.assertEqual(len(lr.static_routes), 1)
+
+        self.api.lr_route_del(
+            lr.uuid, route_in_main.ip_prefix).execute(check_error=True)
+        self.assertEqual(len(lr.static_routes), 0)
+
     def test_lr_route_list(self):
         lr = self._lr_add()
         routes = {self._lr_add_route(lr.uuid, prefix="192.0.%s.0/25" % p)
@@ -1032,6 +1119,29 @@ class TestLogicalRouterOps(OvnNorthboundTest):
         route_set = set(self.api.lr_route_list(lr.uuid).execute(
             check_error=True))
         self.assertTrue(routes.issubset(route_set))
+
+    def test_lr_route_list_route_table(self):
+        lr = self._lr_add()
+        route_table = "route-table"
+
+        prefix1 = "10.0.0.0/24"
+        prefix2 = "10.0.1.0/24"
+
+        self._lr_add_route(lr.uuid, prefix=prefix1)
+        self._lr_add_route(lr.uuid, prefix=prefix2, route_table=route_table)
+
+        routes = self.api.lr_route_list(lr.uuid).execute(check_error=True)
+        self.assertEqual(len(routes), 2)  # all routes in logical router
+
+        for route_table, prefix in zip(
+            [const.MAIN_ROUTE_TABLE, route_table],
+            [prefix1, prefix2]
+        ):
+            routes = self.api.lr_route_list(
+                lr.uuid, route_table=route_table).execute(check_error=True)
+            self.assertEqual(len(routes), 1)
+            self.assertEqual(routes[0].ip_prefix, prefix)
+            self.assertEqual(routes[0].route_table, route_table)
 
     def _lr_nat_add(self, *args, **kwargs):
         lr = kwargs.pop('router', self._lr_add(utils.get_rand_device_name()))
@@ -1378,7 +1488,7 @@ class TestLogicalRouterPortOps(OvnNorthboundTest):
     def test_lrp_add(self):
         self._lrp_add(None, 'de:ad:be:ef:4d:ad', ['192.0.2.0/24'])
 
-    def test_lpr_add_peer(self):
+    def test_lrp_add_peer(self):
         lrp = self._lrp_add(None, 'de:ad:be:ef:4d:ad', ['192.0.2.0/24'],
                             peer='fake_peer')
         self.assertIn('fake_peer', lrp.peer)
@@ -1409,7 +1519,7 @@ class TestLogicalRouterPortOps(OvnNorthboundTest):
         name = utils.get_rand_device_name()
         args = (name, 'de:ad:be:ef:4d:ad', ['192.0.2.0/24'])
         self._lrp_add(*args)
-        self.assertRaises(RuntimeError, self._lrp_add, *args, may_exist=True)
+        self._lrp_add(*args, may_exist=True)
 
     def test_lrp_add_may_exist_different_router(self):
         name = utils.get_rand_device_name()
@@ -2526,3 +2636,137 @@ class TestBFDOps(OvnNorthboundTest):
         b1 = self.api.bfd_add(name, name).execute(check_error=True)
         b2 = self.api.bfd_get(b1.uuid).execute(check_error=True)
         self.assertEqual(b1, b2)
+
+
+class TestMirrorOps(OvnNorthboundTest):
+
+    def setUp(self):
+        super(TestMirrorOps, self).setUp()
+        self.table = self.api.tables['Mirror']
+        self.switch = self.useFixture(
+            fixtures.LogicalSwitchFixture(self.api)).obj
+        lsp_add_cmd = self.api.lsp_add(self.switch.uuid, 'testport')
+        with self.api.transaction(check_error=True) as txn:
+            txn.add(lsp_add_cmd)
+
+        self.port_uuid = lsp_add_cmd.result.uuid
+
+    def _mirror_add(self, name=None, direction_filter='to-lport',
+                    dest='10.11.1.1', mirror_type='gre', index=42, **kwargs):
+        if not name:
+            name = utils.get_rand_name()
+        cmd = self.api.mirror_add(name, mirror_type, index, direction_filter,
+                                  dest, **kwargs)
+        row = cmd.execute(check_error=True)
+        self.assertEqual(cmd.name, row.name)
+        self.assertEqual(cmd.direction_filter, row.filter)
+        self.assertEqual(cmd.dest, row.sink)
+        self.assertEqual(cmd.mirror_type, row.type)
+        self.assertEqual(cmd.index, row.index)
+        return idlutils.frozen_row(row)
+
+    def test_mirror_addx(self):
+        self._mirror_add(dest='10.13.1.1')
+
+    def test_mirror_add_duplicate(self):
+        name = utils.get_rand_name()
+        cmd = self.api.mirror_add(name, 'gre', 100, 'from-lport',
+                                  '192.169.1.1')
+        cmd.execute(check_error=True)
+        self.assertRaises(RuntimeError, cmd.execute, check_error=True)
+
+    def test_mirror_add_may_exist_no_change(self):
+        name = utils.get_rand_name()
+        mirror1 = self._mirror_add(name=name, dest='10.18.1.1')
+        mirror2 = self._mirror_add(name=name, dest='10.18.1.1',
+                                   may_exist=True)
+        self.assertEqual(mirror1, mirror2)
+
+    def test_mirror_add_may_exist_change(self):
+        name = utils.get_rand_name()
+        mirror1 = self._mirror_add(name=name, dest='10.12.1.0')
+        mirror2 = self._mirror_add(
+            name=name, direction_filter='from-lport', dest='10.12.1.0',
+            mirror_type='gre', index=100, may_exist=True,
+        )
+        self.assertNotEqual(mirror1, mirror2)
+        self.assertEqual(mirror1.uuid, mirror2.uuid)
+
+    def test_mirror_del(self):
+        name = utils.get_rand_name()
+        mirror1 = self._mirror_add(name=name, dest='10.14.1.0')
+        self.assertIn(mirror1.uuid, self.table.rows)
+        self.api.mirror_del(mirror1.uuid).execute(check_error=True)
+        self.assertNotIn(mirror1.uuid, self.table.rows)
+
+    def test_mirror_get(self):
+        name = utils.get_rand_name()
+        mirror1 = self.api.mirror_add(name, 'gre', 100, 'from-lport',
+                                      '10.15.1.1').execute(check_error=True)
+        mirror2 = self.api.mirror_get(mirror1.uuid).execute(check_error=True)
+        self.assertEqual(mirror1, mirror2)
+
+    def test_lsp_attach_detach_mirror(self):
+        mirror = self._mirror_add(name='my_mirror')
+        self.api.lsp_attach_mirror(
+            self.port_uuid, mirror.uuid).execute(check_error=True)
+        port = self.api.lsp_get(self.port_uuid).execute(check_error=True)
+
+        self.assertEqual(1, len(port.mirror_rules))
+        mir_rule = self.api.lookup('Mirror', port.mirror_rules[0].uuid)
+        self.assertEqual(mirror.uuid, mir_rule.uuid)
+
+        self.api.lsp_detach_mirror(
+            self.port_uuid, mirror.uuid).execute(check_error=True)
+        port = self.api.lsp_get(self.port_uuid).execute(check_error=True)
+
+        self.assertEqual(0, len(port.mirror_rules))
+
+    def test_lsp_attach_detach_may_exist(self):
+        mirror1 = self._mirror_add(name='mirror1')
+        self.api.lsp_attach_mirror(
+            self.port_uuid, mirror1.uuid).execute(check_error=True)
+        mirror2 = self._mirror_add(name='mirror2', dest='10.17.1.0')
+
+        # Try to attach a mirror to a port which already has mirror_rule
+        # attached
+        failing_cmd = self.api.lsp_attach_mirror(
+            self.port_uuid, mirror1.uuid,
+            may_exist=False)
+        self.assertRaises(
+            RuntimeError,
+            failing_cmd.execute,
+            check_error=True
+        )
+
+        self.api.lsp_attach_mirror(
+            self.port_uuid, mirror2.uuid,
+            may_exist=True).execute(check_error=True)
+        check_res = self.api.lsp_get(self.port_uuid).execute(check_error=True)
+        rule_on_lsp = False
+        for m_rule in check_res.mirror_rules:
+            if mirror2.uuid == m_rule.uuid:
+                rule_on_lsp = True
+        self.assertTrue(rule_on_lsp)
+
+        self.api.lsp_detach_mirror(
+            self.port_uuid, mirror2.uuid).execute(check_error=True)
+        port = self.api.lsp_get(self.port_uuid).execute(check_error=True)
+        self.assertEqual(1, len(port.mirror_rules))
+        self.assertEqual(mirror1.uuid, port.mirror_rules[0].uuid)
+
+        # Try to detach a rule that is already detached
+        failing_cmd = self.api.lsp_detach_mirror(
+            self.port_uuid, mirror2.uuid)
+        self.assertRaises(
+            RuntimeError,
+            failing_cmd.execute,
+            check_error=True
+        )
+
+        # detach with if_exist=True, and check the result, to be as previously
+        self.api.lsp_detach_mirror(
+            self.port_uuid, mirror2.uuid,
+            if_exist=True).execute(check_error=True)
+        self.assertEqual(1, len(port.mirror_rules))
+        self.assertEqual(mirror1.uuid, port.mirror_rules[0].uuid)

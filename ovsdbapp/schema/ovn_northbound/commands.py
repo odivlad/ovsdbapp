@@ -853,7 +853,7 @@ class LrpAddCommand(cmd.BaseCommand):
         self.networks = [str(netaddr.IPNetwork(net)) for net in networks]
         self.router = router
         self.port = port
-        self.peer = peer
+        self.peer = peer if peer else []
         self.may_exist = may_exist
         self.columns = columns
         super().__init__(api)
@@ -1137,9 +1137,117 @@ class BFDGetCommand(cmd.BaseGetRowCommand):
     table = 'BFD'
 
 
+class MirrorAddCommand(cmd.AddCommand):
+    # cmd.AddCommand uses self.table_name, other base commands use self.table
+    table_name = 'Mirror'
+
+    def __init__(self, api, name, mirror_type, index, direction_filter, dest,
+                 external_ids=None, may_exist=False):
+        self.name = name
+        self.direction_filter = direction_filter
+        self.mirror_type = mirror_type
+        if mirror_type != 'local':
+            self.dest = str(netaddr.IPAddress(dest))
+        else:
+            self.dest = dest
+        self.index = index
+
+        super().__init__(api)
+
+        self.columns = {
+            'name': name,
+            'filter': direction_filter,
+            'sink': dest,
+            'type': mirror_type,
+            'index': index,
+            'external_ids': external_ids or {},
+        }
+        self.may_exist = may_exist
+
+    def run_idl(self, txn):
+        try:
+            mirror_result = self.api.lookup(self.table_name, self.name)
+            self.result = rowview.RowView(mirror_result)
+            if self.may_exist:
+                self.set_columns(mirror_result, **self.columns)
+                self.result = rowview.RowView(mirror_result)
+                return
+            raise RuntimeError("Mirror %s already exists" % self.name)
+        except idlutils.RowNotFound:
+            pass
+
+        mirror = txn.insert(self.api.tables[self.table_name])
+        mirror.name = self.name
+        mirror.type = self.mirror_type
+        mirror.filter = self.direction_filter
+        mirror.sink = self.dest
+        mirror.index = self.index
+        self.set_columns(mirror, **self.columns)
+        # Setting the result to something other than a :class:`rowview.RowView`
+        # or :class:`ovs.db.idl.Row` typed value will make the parent
+        # `post_commit` method retrieve the newly insterted row from IDL and
+        # return that to the caller.
+        self.result = mirror.uuid
+
+
+class MirrorDelCommand(cmd.DbDestroyCommand):
+    table = 'Mirror'
+
+    def __init__(self, api, record):
+        super().__init__(api, self.table, record)
+
+
+class MirrorGetCommand(cmd.BaseGetRowCommand):
+    table = 'Mirror'
+
+
+class LspAttachMirror(cmd.BaseCommand):
+    def __init__(self, api, port, mirror, may_exist=False):
+        super().__init__(api)
+        self.port = port
+        self.mirror = mirror
+        self.may_exist = may_exist
+
+    def run_idl(self, txn):
+        try:
+            lsp = self.api.lookup('Logical_Switch_Port', self.port)
+            mirror = self.api.lookup('Mirror', self.mirror)
+            if mirror in lsp.mirror_rules and not self.may_exist:
+                msg = "Mirror Rule %s is already set on LSP %s" % (self.mirror,
+                                                                   self.port)
+                raise RuntimeError(msg)
+            lsp.addvalue('mirror_rules', self.mirror)
+        except idlutils.RowNotFound as e:
+            raise RuntimeError("LSP %s not found" % self.port) from e
+
+
+class LspDetachMirror(cmd.BaseCommand):
+    def __init__(self, api, port, mirror, if_exist=False):
+        super().__init__(api)
+        self.port = port
+        self.mirror = mirror
+        self.if_exist = if_exist
+
+    def run_idl(self, txn):
+        try:
+            lsp = self.api.lookup('Logical_Switch_Port', self.port)
+            mirror = self.api.lookup('Mirror', self.mirror)
+            if mirror not in lsp.mirror_rules and not self.if_exist:
+                msg = "Mirror Rule %s doesn't exist on LSP %s" % (self.mirror,
+                                                                  self.port)
+                raise RuntimeError(msg)
+            lsp.delvalue('mirror_rules', self.mirror)
+        except idlutils.RowNotFound as e:
+            if self.if_exists:
+                return
+            msg = "LSP %s doesn't exist" % self.port
+            raise RuntimeError(msg) from e
+
+
 class LrRouteAddCommand(cmd.BaseCommand):
     def __init__(self, api, router, prefix, nexthop, port=None,
-                 policy='dst-ip', may_exist=False):
+                 policy='dst-ip', may_exist=False, ecmp=False,
+                 route_table=const.MAIN_ROUTE_TABLE):
         prefix = str(netaddr.IPNetwork(prefix))
         if nexthop != const.ROUTE_DISCARD:
             nexthop = str(netaddr.IPAddress(nexthop))
@@ -1149,12 +1257,20 @@ class LrRouteAddCommand(cmd.BaseCommand):
         self.nexthop = nexthop
         self.port = port
         self.policy = policy
+        self.ecmp = ecmp
+        self.route_table = route_table
         self.may_exist = may_exist
 
     def run_idl(self, txn):
         lr = self.api.lookup('Logical_Router', self.router)
         for route in lr.static_routes:
-            if self.prefix == route.ip_prefix:
+            if (
+                self.prefix == route.ip_prefix and
+                self.route_table == route.route_table and
+                "ic-learned-route" not in route.external_ids
+            ):
+                if self.ecmp and self.nexthop != route.nexthop:
+                    continue
                 if not self.may_exist:
                     msg = "Route %s already exists on router %s" % (
                         self.prefix, self.router)
@@ -1169,6 +1285,7 @@ class LrRouteAddCommand(cmd.BaseCommand):
         route.ip_prefix = self.prefix
         route.nexthop = self.nexthop
         route.policy = self.policy
+        route.route_table = self.route_table
         if self.port:
             route.output_port = self.port
         lr.addvalue('static_routes', route)
@@ -1183,12 +1300,15 @@ class LrRouteAddCommand(cmd.BaseCommand):
 
 
 class LrRouteDelCommand(cmd.BaseCommand):
-    def __init__(self, api, router, prefix=None, if_exists=False):
+    def __init__(self, api, router, prefix=None, if_exists=False,
+                 nexthop=None, route_table=const.MAIN_ROUTE_TABLE):
         if prefix is not None:
             prefix = str(netaddr.IPNetwork(prefix))
         super().__init__(api)
         self.router = router
         self.prefix = prefix
+        self.nexthop = nexthop
+        self.route_table = route_table
         self.if_exists = if_exists
 
     def run_idl(self, txn):
@@ -1197,9 +1317,14 @@ class LrRouteDelCommand(cmd.BaseCommand):
             lr.static_routes = []
             return
         for route in lr.static_routes:
-            if self.prefix == route.ip_prefix:
+            if (
+                self.prefix == route.ip_prefix and
+                self.route_table == route.route_table
+            ):
+                if self.nexthop and route.nexthop != self.nexthop:
+                    continue
+
                 lr.delvalue('static_routes', route)
-                # There should only be one possible match
                 return
 
         if not self.if_exists:
@@ -1209,13 +1334,19 @@ class LrRouteDelCommand(cmd.BaseCommand):
 
 
 class LrRouteListCommand(cmd.ReadOnlyCommand):
-    def __init__(self, api, router):
+    def __init__(self, api, router, route_table=None):
         super().__init__(api)
         self.router = router
+        self.route_table = route_table
 
     def run_idl(self, txn):
         lr = self.api.lookup('Logical_Router', self.router)
-        self.result = [rowview.RowView(r) for r in lr.static_routes]
+        if self.route_table is not None:
+            self.result = [rowview.RowView(r)
+                           for r in lr.static_routes
+                           if r.route_table == self.route_table]
+        else:
+            self.result = [rowview.RowView(r) for r in lr.static_routes]
 
 
 class LrNatAddCommand(cmd.BaseCommand):

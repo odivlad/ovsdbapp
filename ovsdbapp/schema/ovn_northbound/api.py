@@ -735,7 +735,8 @@ class API(api.API, metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def lr_route_add(self, router, prefix, nexthop, port=None,
-                     policy='dst-ip', may_exist=False):
+                     policy='dst-ip', may_exist=False, ecmp=False,
+                     route_table=const.MAIN_ROUTE_TABLE):
         """Add a route to 'router'
 
         :param router:    The name or uuid of the router
@@ -754,11 +755,18 @@ class API(api.API, metaclass=abc.ABCMeta):
         :type policy:     string, 'dst-ip' or 'src-ip'
         :param may_exist: If True, don't fail if the route already exists
         :type may_exist:  boolean
+        :param ecmp:      Enable ECMP support. If True adding routes with
+                          same IP prefix is allowed as long as the nexthop is
+                          different
+        :type ecmp:       boolean
+        :param route_table: The name of route table
+        :type route_table:  str
         returns:          :class:`Command` with RowView result
         """
 
     @abc.abstractmethod
-    def lr_route_del(self, router, prefix=None, if_exists=False):
+    def lr_route_del(self, router, prefix=None, if_exists=False, nexthop=None,
+                     route_table=const.MAIN_ROUTE_TABLE):
         """Remove routes from 'router'
 
         :param router:    The name or uuid of the router
@@ -767,16 +775,25 @@ class API(api.API, metaclass=abc.ABCMeta):
         :type prefix:     type string
         :param if_exists: If True, don't fail if the port doesn't exist
         :type if_exists:  boolean
+        :parm nexthop:    The gateway to use for this route, which should be
+                          the IP address of one of `router`'s logical router
+                          ports or the IP address of a logical port
+        :type nexthop:    string
+        :param route_table: The name of route table
+        :type route_table:  str
         :returns:        :class:`Command` with no result
         """
 
     @abc.abstractmethod
-    def lr_route_list(self, router):
+    def lr_route_list(self, router, route_table=None):
         """Get the UUIDs of static logical routes from 'router'
 
-        :param router: The name or uuid of the router
-        :type router:  string or uuid.UUID
-        :returns:      :class:`Command` with RowView list result
+        :param router:      The name or uuid of the router
+        :type router:       string or uuid.UUID
+        :param route_table: The name of route table. Pass "" to get routes of
+                            global route table only
+        :type route_table:  str
+        :returns:           :class:`Command` with RowView list result
         """
 
     @abc.abstractmethod
@@ -1465,4 +1482,72 @@ class API(api.API, metaclass=abc.ABCMeta):
         :param uuid:   The uuid of the BFD entry
         :type uuid:    uuid.UUID
         :returns:      :class:`Command` with RowView result
+        """
+
+    @abc.abstractmethod
+    def mirror_get(self, uuid):
+        """Get the Mirror entry"""
+
+    @abc.abstractmethod
+    def mirror_del(self, mirror):
+        """Delete a Mirror"""
+
+    @abc.abstractmethod
+    def mirror_add(self, name, mirror_type, index, direction_filter, dest,
+                   external_ids=None,
+                   may_exist=False):
+        """Create a Mirror entry
+
+        :param name:    Name of the Mirror to create.
+        :type name:     str
+        :param mirror_type:    The type of the mirroring can be gre or erspan.
+        :type mirror_type:     str
+        :param index:   The index filed will be used for the Index field in
+                        ERSPAN header as decimal, and as hexadecimal value in
+                        the SpanID field, for GRE mirrors it will be the Key
+                        field.
+        :type index:    int
+        :param direction_filter:  The direction of the traffic to be mirrored,
+                                  can be from-lport and to-lprt.
+        :type direction_filter:   str
+        :param dest:    The destination IP address of the mirroring.
+        :type dest:     str
+
+
+        :param external_ids: Values to be added as external_id pairs.
+        :type external_ids:  Optional[Dict[str,str]]
+        :param may_exist:    If True, update any existing Mirror entry if it
+                             already exists.  Default is False which will raise
+                             an error if a Mirror entry with same logical_port,
+                             sink pair already exists.
+        :type may_exist:     Optional[bool]
+        :returns:            :class:`Command` with RowView result
+        """
+
+    @abc.abstractmethod
+    def lsp_attach_mirror(self, port, mirror, may_exist=False):
+        """Attaches an lsp to the given mirror
+
+        :param port: the id of the lsp
+        :type port: str
+        :param mirror: the name or ID of the mirror.
+        :type mirror: str
+        :param may_exist:    If True, don't fail if the mirror_rule already
+                             exists.
+        :type may_exist:     Optional[bool]
+        :returns: :class:`Command` with RowView result
+        """
+
+    @abc.abstractmethod
+    def lsp_detach_mirror(self, port, mirror, if_exist=False):
+        """Detaches an lsp from the given mirror
+
+        :param port: the id of the lsp
+        :type port: str
+        :param mirror: the name or ID of the mirror
+        :type mirror: str
+        :param if_exist:    If True, don't fail if the mirror_rules entry
+                            doesn't exist.
+        :type if_exist:     Optional[bool]
+        :returns: :class:`Command` with RowView result
         """
